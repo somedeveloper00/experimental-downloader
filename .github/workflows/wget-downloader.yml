@@ -1,0 +1,88 @@
+name: Wget Downloader
+
+on:
+  workflow_dispatch:
+    inputs:
+      link:
+        description: '🔗 Direct Link'
+        required: true
+        type: string
+      parts_size:
+        description: '🫙 Parts size (MB)'
+        required: false
+        type: string
+        default: '45'
+
+jobs:
+  download-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Prepare wget branch
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git fetch origin
+
+          if git ls-remote --exit-code --heads origin wget; then
+            git checkout wget
+            git pull origin wget
+          else
+            git checkout --orphan wget
+            git rm -rf . || true
+            mkdir -p wget
+            git commit --allow-empty -m "[bot] Initialize wget branch"
+            git push --set-upstream origin wget
+          fi
+
+      - name: Download
+        id: download
+        run: |
+          mkdir -p tmpwget
+          cd tmpwget
+          
+          wget --content-disposition --trust-server-names "${{ github.event.inputs.link }}"
+
+          # find name
+          FILE=$(ls -1 | head -n 1)
+          FILE_NO_EXTENSION="${FILE%.*}"
+          SAFE_NAME=$(echo "$FILE" | sed 's/^[[:space:]]*//' | tr ' ' '_')
+          echo "SAFE_NAME=$SAFE_NAME" >> $GITHUB_ENV
+
+          # zip
+          mkdir -p ../wget
+          zip -0 -s "${{ inputs.parts_size }}m" "../wget/${SAFE_NAME}.zip" "$FILE"
+          
+      - name: Generate README with Download Links
+        run: |
+          rm -f README.md
+          
+          echo "# 📥 Wget Download Links" > README.md
+          echo "Generated on: $(date)" >> README.md
+          echo "" >> README.md
+          
+          # loop through all files in the wget folder
+          for file in wget/*; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              # URL Encode spaces for the markdown link
+              encoded_filename=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$filename")
+              # Construct the raw link
+              url="https://github.com/${{ github.repository }}/raw/wget/wget/$encoded_filename"
+              echo "- [Download $filename]($url)" >> README.md
+            fi
+          done
+          
+      - name: Commit
+        run: |
+          git add README.md wget
+          git commit -m "[bot] Add wget download ${{ env.SAFE_NAME }}"
+          git push

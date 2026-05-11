@@ -1,0 +1,163 @@
+name: Web Downloader
+
+on:
+  workflow_dispatch:
+    inputs:
+      website_url:
+        description: '🔗 Website URL to archive'
+        required: true
+        type: string
+      output_name:
+        description: '📝 Output file name (without extension)'
+        required: true
+        default: 'website_archive'
+        type: string
+      use_warp:
+        description: '🛡️ Use WARP (sometimes helps | +40s)'
+        required: true
+        default: false
+        type: boolean
+      parts_size:
+        description: '🫙 Parts size (MB)'
+        required: false
+        type: string
+        default: '45'
+
+jobs:
+  archive-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Prepare web branch
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git fetch origin
+
+          if git ls-remote --exit-code --heads origin web; then
+            git checkout web
+            git pull origin web
+          else
+            git checkout --orphan web
+            git rm -rf . || true
+            mkdir -p web
+            git commit --allow-empty -m "[bot] Initialize web branch"
+            git push --set-upstream origin web
+          fi
+
+      - name: Setup ArchiveBox Docker
+        run: |
+          docker pull archivebox/archivebox:latest
+      
+      - name: Setup WARP
+        if: ${{ inputs.use_warp == 'true' || inputs.use_warp == true }}
+        run: |
+          # clean up any existing container/network (useful for self-hosted runners)
+          docker rm -f warp 2>/dev/null || true
+          docker network create warp-net 2>/dev/null || true
+
+          # start WARP 
+          docker run -d \
+            --name warp \
+            --restart=always \
+            --network warp-net \
+            -p 1080:1080 \
+            --cap-add NET_ADMIN \
+            --sysctl net.ipv6.conf.all.disable_ipv6=0 \
+            --sysctl net.ipv4.conf.all.src_valid_mark=1 \
+            -v warp-data:/var/lib/cloudflare-warp \
+            caomingjun/warp
+
+          echo "Waiting for WARP to initialize..."
+
+          # dynamic polling loop (up to 30 seconds max)
+          WARP_READY=false
+          for i in {1..10}; do
+            # Use 1.1.1.1 for faster trace resolution
+            RESULT=$(curl -s --max-time 3 --socks5-hostname 127.0.0.1:1080 https://1.1.1.1/cdn-cgi/trace 2>/dev/null || true)
+            
+            if echo "$RESULT" | grep -qE "warp=(on|plus)"; then
+              echo "WARP proxy is ready! (Took $i attempts)"
+              echo "$RESULT" | grep -E "^(ip|warp|colo)=" # Print clean debug info
+              WARP_READY=true
+              break
+            fi
+            
+            echo "Attempt $i/10 - WARP not ready, waiting 3s..."
+            sleep 3
+          done
+
+          if [ "$WARP_READY" = false ]; then
+            echo "WARP failed to activate fully, continuing anyway..."
+            echo "Last response: $RESULT"
+            # exit 1  <-- Uncomment this if you want the pipeline to FAIL when WARP fails
+          fi
+
+      - name: Archive Website
+        id: archive
+        run: |
+          # create a temporary directory for ArchiveBox data
+          mkdir -p archive_data
+          chmod 777 archive_data
+
+          PROXY_ARGS=""
+          if [ "${{ inputs.use_warp }}" = "true" ]; then
+            echo "Using WARP proxy..."
+            PROXY_ARGS="--network warp-net -e HTTP_PROXY=socks5h://warp:1080 -e HTTPS_PROXY=socks5h://warp:1080"
+          fi
+          
+          # initialize ArchiveBox
+          docker run --rm $PROXY_ARGS -v $PWD/archive_data:/data archivebox/archivebox init --setup
+          
+          # add and archive the URL
+          docker run --rm $PROXY_ARGS -v $PWD/archive_data:/data archivebox/archivebox add "${{ inputs.website_url }}"
+          
+          # move to the branch folder
+          mkdir -p web
+          cd web
+          
+          OUTPUT_NAME="${{ inputs.output_name }}"
+          
+          # zip
+          zip -0 -r -s "${{ inputs.parts_size }}m" "${OUTPUT_NAME}.zip" ../archive_data
+          
+          echo "FILE_NAME=$OUTPUT_NAME" >> $GITHUB_ENV
+
+      - name: Stop WARP
+        if: ${{ inputs.use_warp }}
+        run: |
+          docker stop warp || true
+
+      - name: Generate README with Download Links
+        run: |
+          rm -f README.md
+          
+          echo "# 📥 Archive Download Links" > README.md
+          echo "Generated on: $(date)" >> README.md
+          echo "" >> README.md
+          
+          # loop through all files in the web folder
+          for file in web/*; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              # URL Encode spaces for the markdown link
+              encoded_filename=$(echo "$filename" | sed 's/ /%20/g')
+              # Construct the raw link
+              url="https://github.com/${{ github.repository }}/raw/web/web/$encoded_filename"
+              echo "- [Download $filename]($url)" >> README.md
+            fi
+          done
+          
+      - name: Commit
+        run: |
+          git add README.md web
+          git commit -m "[bot] Add website archive ${{ env.FILE_NAME }}"
+          git push
