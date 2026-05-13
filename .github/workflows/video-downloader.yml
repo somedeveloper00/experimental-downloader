@@ -143,12 +143,6 @@ jobs:
             FORMAT_OPTS="-f bestvideo[height<=${QUALITY}]+bestaudio/best[height<=${QUALITY}] --merge-output-format mp4"
           fi
 
-          PROXY_ARGS=""
-          if [ "${{ inputs.use_warp }}" = "true" ]; then
-            echo "Using WARP proxy..."
-            PROXY_ARGS="--proxy \"socks5://127.0.0.1:1080\""
-          fi
-
           # parse output name
           OUTPUT_NAME="${{ inputs.output_name }}"
           if [ -n "$OUTPUT_NAME" ]; then
@@ -160,7 +154,7 @@ jobs:
           # download using yt-dlp
           mkdir -p tmpvideos
           cd tmpvideos
-          yt-dlp --remote-components ejs:github $PROXY_ARGS $FORMAT_OPTS $OUTPUT_OPTS "${{ inputs.youtube_url }}"
+          yt-dlp --remote-components ejs:github --proxy socks5://127.0.0.1:1080 $FORMAT_OPTS $OUTPUT_OPTS "${{ inputs.youtube_url }}"
 
           # find name
           FILE=$(ls -1 | head -n 1)
