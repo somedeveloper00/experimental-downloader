@@ -150,7 +150,7 @@ jobs:
           mkdir -p tmpvideos
           cd tmpvideos
           
-          yt-dlp --remote-components ejs:github --proxy "socks5://127.0.0.1:1080" --sub-langs all  --embed-subs $FORMAT_OPTS $OUTPUT_OPTS "${{ inputs.url }}"
+          yt-dlp --remote-components ejs:github --proxy "socks5://127.0.0.1:1080" --sub-langs all  --embed-subs --write-auto-subs $FORMAT_OPTS $OUTPUT_OPTS "${{ inputs.url }}"
 
           # find name
           FILE=$(ls -1 | head -n 1)

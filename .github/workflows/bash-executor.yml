@@ -22,6 +22,11 @@ on:
         required: false
         type: string
         default: '45'
+      branch_name:
+        description: 'ℹ️ Branch name (simultanous workflows cannot be on the same branch)'
+        required: true
+        default: 'videos'
+        type: string
 
 jobs:
   download-and-release:
@@ -36,21 +41,21 @@ jobs:
           persist-credentials: true
           fetch-depth: 0
 
-      - name: Prepare bash branch
+      - name: Prepare branch
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git fetch origin
 
-          if git ls-remote --exit-code --heads origin bash; then
-            git checkout bash
-            git pull origin bash
+          if git ls-remote --exit-code --heads origin ${{ inputs.branch_name }}; then
+            git checkout ${{ inputs.branch_name }}
+            git pull origin ${{ inputs.branch_name }}
           else
-            git checkout --orphan bash
+            git checkout --orphan ${{ inputs.branch_name }}
             git rm -rf . || true
-            mkdir -p bash
-            git commit --allow-empty -m "[bot] Initialize bash branch"
-            git push --set-upstream origin bash
+            mkdir -p ${{ inputs.branch_name }}
+            git commit --allow-empty -m "[bot] Initialize ${{ inputs.branch_name }} branch"
+            git push --set-upstream origin ${{ inputs.branch_name }}
           fi
 
       - name: Setup WARP
@@ -137,7 +142,7 @@ jobs:
               # URL Encode spaces for the markdown link
               encoded_filename=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$filename")
               # Construct the raw link
-              url="https://github.com/${{ github.repository }}/raw/bash/bash/$encoded_filename"
+              url="https://github.com/${{ github.repository }}/raw/${{ inputs.branch_name }}/bash/$encoded_filename"
               echo "- [Download $filename]($url)" >> README.md
             fi
           done
