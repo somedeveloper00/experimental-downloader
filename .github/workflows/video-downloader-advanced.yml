@@ -35,7 +35,7 @@ on:
       subtitles:
         description: "📄 Input for the subtitles. (e.g. `--sub-langs \"all\"`, `--sub-langs \"en.*\"`, `--sub-langs \"en.*,ja,per,fa\"`, `--sub-langs \"en.*\" --write-auto-subs` | `--sub-langs` defines languages, `--write-auto-subs` defines inclusion of auto-generated subtitles)"
         required: true
-        default: '--sub-langs \"all\"'
+        default: '--sub-langs "all"'
         type: string
 
 jobs:
